@@ -1,0 +1,23 @@
+name: ${project.name}
+version: ${project.version}
+author: totemo
+authors: [totemo]
+description: ${project.description}
+website: ${project.url}
+database: true
+main: nu.nerd.hc.HyperCarts
+
+permissions:
+  hypercarts.admin:
+    description: Permission to administer the plugin.
+    default: op
+
+commands:
+  cart-speed:
+    description: ${project.name} administrative command.
+    permission: hypercarts.admin
+    usage: |
+    
+      §e/<command> help§f - Show usage help.
+      §e/<command>§f - Show the current maximum minecart speed.
+      §e/<command> <number>§f - Set a new maximum minecart speed.
