@@ -1,6 +1,7 @@
 package nu.nerd.hc;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Minecart;
@@ -8,8 +9,6 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.vehicle.VehicleCreateEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-
-import net.md_5.bungee.api.ChatColor;
 
 // ----------------------------------------------------------------------------
 /**
