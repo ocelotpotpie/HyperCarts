@@ -160,7 +160,7 @@ public class HyperCarts extends JavaPlugin implements Listener {
     public void onVehicleCreate(VehicleCreateEvent event) {
         if (event.getVehicle() instanceof Minecart) {
             Minecart cart = (Minecart) event.getVehicle();
-            cart.setMaxSpeed(_maxSpeed);
+            cart.setMaxSpeed(getMaxCartSpeed());
         }
     }
 
@@ -174,17 +174,19 @@ public class HyperCarts extends JavaPlugin implements Listener {
         if (event.getVehicle() instanceof Minecart) {
             Minecart cart = (Minecart) event.getVehicle();
             Block toBlock = event.getTo().getBlock();
-            if (cart.getMaxSpeed() > VANILLA_MAX_SPEED) {
+            if (isRail(toBlock)) {
                 if (isNonAttenuatingRailRamp(toBlock)) {
-                    Vector oldVelocity = _lastVelocity.get(cart.getEntityId());
-                    if (oldVelocity != null) {
-                        cart.setVelocity(oldVelocity);
+                    if (cart.getMaxSpeed() > VANILLA_MAX_SPEED) {
+                        Vector oldVelocity = _lastVelocity.get(cart.getEntityId());
+                        if (oldVelocity != null) {
+                            cart.setVelocity(oldVelocity);
+                        }
+                        cart.setMaxSpeed(VANILLA_MAX_SPEED);
                     }
-                    cart.setMaxSpeed(VANILLA_MAX_SPEED);
+                } else {
+                    cart.setMaxSpeed((cart.getPassenger() instanceof Player) ? getState((Player) cart.getPassenger()).getMaxCartSpeed()
+                                                                             : getMaxCartSpeed());
                 }
-            } else if (isRail(toBlock) && !isNonAttenuatingRailRamp(toBlock)) {
-                cart.setMaxSpeed((cart.getPassenger() instanceof Player) ? getState((Player) cart.getPassenger()).getMaxCartSpeed()
-                                                                         : getMaxCartSpeed());
             }
             _lastVelocity.put(cart.getEntityId(), cart.getVelocity());
         }
