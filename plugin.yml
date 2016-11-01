@@ -9,15 +9,28 @@ main: nu.nerd.hc.HyperCarts
 
 permissions:
   hypercarts.admin:
-    description: Permission to administer the plugin.
+    description: Permission to set the server-wide maximum cart speed.
     default: op
 
+  hypercarts.user:
+    description: Permission to set one's personal maximum cart speed.
+    default: true
+
 commands:
-  cart-speed:
-    description: ${project.name} administrative command.
+  hypercarts:
+    description: Set the server-wide maximum cart speed.
     permission: hypercarts.admin
     usage: |
-    
+
       §e/<command> help§f - Show usage help.
-      §e/<command>§f - Show the current maximum minecart speed.
-      §e/<command> <number>§f - Set a new maximum minecart speed.
+      §e/<command>§f - Show the server-wide maximum minecart speed.
+      §e/<command> <number>§f - Set the server-wide maximum minecart speed.
+
+  cart-speed:
+    description: Set your personal maximum cart speed.
+    permission: hypercarts.user
+    usage: |
+
+      §e/<command> help§f - Show usage help.
+      §e/<command>§f - Show your current personal maximum minecart speed.
+      §e/<command> <number>§f - Set a new personal maximum minecart speed.

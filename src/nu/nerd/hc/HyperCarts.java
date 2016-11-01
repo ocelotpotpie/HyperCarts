@@ -1,5 +1,7 @@
 package nu.nerd.hc;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.HashMap;
 
 import org.bukkit.Bukkit;
@@ -8,9 +10,13 @@ import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Minecart;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.vehicle.VehicleCreateEvent;
 import org.bukkit.event.vehicle.VehicleMoveEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -39,18 +45,50 @@ import org.bukkit.util.Vector;
  * <li>Restore the velocity of the cart to what it was in the previous
  * tick.</li>
  * </ul>
+ *
+ * Players can specify their own maximum cart speed in the range between the
+ * vanilla value and the server-wide maximum, but this will only be applied to
+ * carts ridden by players, not empty carts or chest carts, for instance. It is
+ * too onerous to track who placed what cart across restarts.
  */
 public class HyperCarts extends JavaPlugin implements Listener {
+    /**
+     * This plugin as a singleton.
+     */
+    public static HyperCarts PLUGIN;
+
     // ------------------------------------------------------------------------
     /**
      * @see org.bukkit.plugin.java.JavaPlugin#onEnable()
      */
     @Override
     public void onEnable() {
+        PLUGIN = this;
+
         saveDefaultConfig();
         _maxSpeed = getConfig().getDouble("max-speed");
 
+        File playersFile = new File(getDataFolder(), PLAYERS_FILE);
+        _playerConfig = YamlConfiguration.loadConfiguration(playersFile);
+
         Bukkit.getPluginManager().registerEvents(this, this);
+    }
+
+    // ------------------------------------------------------------------------
+    /**
+     * @see org.bukkit.plugin.java.JavaPlugin#onDisable()
+     */
+    @Override
+    public void onDisable() {
+        for (PlayerState state : _state.values()) {
+            state.save(_playerConfig);
+        }
+
+        try {
+            _playerConfig.save(new File(getDataFolder(), PLAYERS_FILE));
+        } catch (IOException ex) {
+            getLogger().warning("Unable to save player data: " + ex.getMessage());
+        }
     }
 
     // ------------------------------------------------------------------------
@@ -60,20 +98,48 @@ public class HyperCarts extends JavaPlugin implements Listener {
      */
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (command.getName().equalsIgnoreCase("cart-speed")) {
+        if (command.getName().equalsIgnoreCase("hypercarts")) {
             if (args.length == 0) {
-                sender.sendMessage(ChatColor.GOLD + "The current maximum cart speed is " + _maxSpeed +
-                                   " (the vanilla default is " + VANILLA_MAX_SPEED + ").");
+                sender.sendMessage(ChatColor.GOLD + "The current server-wide maximum cart speed is " + getMaxCartSpeed() +
+                                   " blocks per tick (the vanilla default is " + VANILLA_MAX_SPEED + ").");
             } else if (args.length == 1) {
                 if (args[0].equalsIgnoreCase("help")) {
                     return false;
                 } else {
                     try {
                         _maxSpeed = Math.max(0.0, Double.parseDouble(args[0]));
-                        sender.sendMessage(ChatColor.GOLD + "Maximum cart speed set to " + _maxSpeed +
-                                           " (the vanilla default is " + VANILLA_MAX_SPEED + ").");
-                        getConfig().set("max-speed", _maxSpeed);
+                        sender.sendMessage(ChatColor.GOLD + "The server-wide maximum cart speed was set to " + getMaxCartSpeed() +
+                                           " blocks per tick (the vanilla default is " + VANILLA_MAX_SPEED + ").");
+                        getConfig().set("max-speed", getMaxCartSpeed());
                         saveConfig();
+                    } catch (NumberFormatException ex) {
+                        sender.sendMessage(ChatColor.RED + "You must specify a floating point number for the new speed.");
+                    }
+                    return true;
+                }
+            } else {
+                return false;
+            }
+        } else if (command.getName().equalsIgnoreCase("cart-speed")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage("You must be in-game to use this command.");
+                return true;
+            }
+
+            PlayerState state = getState((Player) sender);
+            if (args.length == 0) {
+                sender.sendMessage(ChatColor.GOLD + "Your current maximum cart speed is " + state.getMaxCartSpeed() + " blocks per tick.");
+                sender.sendMessage(ChatColor.GOLD + "The vanilla default is " + VANILLA_MAX_SPEED +
+                                   " and the server-wide limit is " + getMaxCartSpeed() + ".");
+            } else if (args.length == 1) {
+                if (args[0].equalsIgnoreCase("help")) {
+                    return false;
+                } else {
+                    try {
+                        state.setMaxCartSpeed(Double.parseDouble(args[0]));
+                        sender.sendMessage(ChatColor.GOLD + "Your maximum cart speed was set to " + state.getMaxCartSpeed() + " blocks per tick.");
+                        sender.sendMessage(ChatColor.GOLD + "The vanilla default is " + VANILLA_MAX_SPEED +
+                                           " and the server-wide limit is " + getMaxCartSpeed() + ".");
                     } catch (NumberFormatException ex) {
                         sender.sendMessage(ChatColor.RED + "You must specify a floating point number for the new speed.");
                     }
@@ -117,10 +183,52 @@ public class HyperCarts extends JavaPlugin implements Listener {
                     cart.setMaxSpeed(VANILLA_MAX_SPEED);
                 }
             } else if (isRail(toBlock) && !isNonAttenuatingRailRamp(toBlock)) {
-                cart.setMaxSpeed(_maxSpeed);
+                cart.setMaxSpeed((cart.getPassenger() instanceof Player) ? getState((Player) cart.getPassenger()).getMaxCartSpeed()
+                                                                         : getMaxCartSpeed());
             }
             _lastVelocity.put(cart.getEntityId(), cart.getVelocity());
         }
+    }
+
+    // ------------------------------------------------------------------------
+    /**
+     * On join, allocate each player a {@link PlayerState} instance.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        _state.put(player.getName(), new PlayerState(player, _playerConfig));
+    }
+
+    // ------------------------------------------------------------------------
+    /**
+     * On quit, forget the {@link PlayerState}.
+     */
+    @EventHandler(ignoreCancelled = true)
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        PlayerState state = _state.remove(event.getPlayer().getName());
+        state.save(_playerConfig);
+    }
+
+    // ------------------------------------------------------------------------
+    /**
+     * Return the server-wide maximum minecart speed.
+     *
+     * @return the server-wide maximum minecart speed.
+     */
+    public double getMaxCartSpeed() {
+        return _maxSpeed;
+    }
+
+    // ------------------------------------------------------------------------
+    /**
+     * Return the state corresponding to the specified Player.
+     *
+     * @param player the Player.
+     * @return the PlayerState.
+     */
+    public PlayerState getState(Player player) {
+        return _state.get(player.getName());
     }
 
     // ------------------------------------------------------------------------
@@ -140,11 +248,11 @@ public class HyperCarts extends JavaPlugin implements Listener {
     // ------------------------------------------------------------------------
     /**
      * Return true if a block is a rail ramp that does not attenuate a cart's
-     * speed, i.e. regular rails or powered rails.
+     * speed, i.e. any kind of rails except unpowered gold rails.
      *
      * @param b the block to check.
-     * @return true if the block is inclined active powered rail, or inclined
-     *         regular rails.
+     * @return true if the block is a type of rail that will not attenuate the
+     *         cart's speed.
      */
     private boolean isNonAttenuatingRailRamp(Block b) {
         return ((b.getType() == Material.RAILS ||
@@ -161,7 +269,7 @@ public class HyperCarts extends JavaPlugin implements Listener {
     /**
      * Vanilla default max speed (blocks/tick).
      */
-    private static final double VANILLA_MAX_SPEED = 0.4;
+    public static final double VANILLA_MAX_SPEED = 0.4;
 
     /**
      * Maximum speed of carts.
@@ -174,4 +282,22 @@ public class HyperCarts extends JavaPlugin implements Listener {
      * Map from cart entity ID to its velocity in the previous tick.
      */
     private final HashMap<Integer, Vector> _lastVelocity = new HashMap<Integer, Vector>();
+
+    /**
+     * Name of players file.
+     */
+    private static final String PLAYERS_FILE = "players.yml";
+
+    /**
+     * Configuration file for per-player settings.
+     */
+    protected YamlConfiguration _playerConfig;
+
+    /**
+     * Map from Player name to {@link PlayerState} instance.
+     *
+     * A Player's PlayerState exists only for the duration of a login.
+     */
+    protected HashMap<String, PlayerState> _state = new HashMap<String, PlayerState>();
+
 } // class HyperCarts
