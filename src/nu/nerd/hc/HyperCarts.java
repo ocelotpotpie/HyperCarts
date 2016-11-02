@@ -175,7 +175,7 @@ public class HyperCarts extends JavaPlugin implements Listener {
             Minecart cart = (Minecart) event.getVehicle();
             Block toBlock = event.getTo().getBlock();
             if (isRail(toBlock)) {
-                if (isNonAttenuatingRailRamp(toBlock)) {
+                if (shouldTakeSlow(toBlock)) {
                     if (cart.getMaxSpeed() > VANILLA_MAX_SPEED) {
                         Vector oldVelocity = _lastVelocity.get(cart.getEntityId());
                         if (oldVelocity != null) {
@@ -249,22 +249,28 @@ public class HyperCarts extends JavaPlugin implements Listener {
 
     // ------------------------------------------------------------------------
     /**
-     * Return true if a block is a rail ramp that does not attenuate a cart's
-     * speed, i.e. any kind of rails except unpowered gold rails.
+     * Return true if a cart should follow the rails in the specified block at
+     * vanilla speed, to avoid problems.
+     *
+     * The particular rail types for which a cart should slow down are:
+     * <ul>
+     * <li>Regular, detector or activator rail ramps, data values 2 through
+     * 5,</li>
+     * <li>Curved regular rails, data values 6 through 9,</li>
+     * <li>Powered rail ramps, data values 10 through 13.</li>
+     * </ul>
      *
      * @param b the block to check.
-     * @return true if the block is a type of rail that will not attenuate the
-     *         cart's speed.
+     * @return true if a cart should follow the rails in the specified block at
+     *         vanilla speed.
      */
-    private boolean isNonAttenuatingRailRamp(Block b) {
-        return ((b.getType() == Material.RAILS ||
-                 b.getType() == Material.DETECTOR_RAIL ||
-                 b.getType() == Material.ACTIVATOR_RAIL)
-                && (b.getData() >= 2 && b.getData() <= 5))
+    private boolean shouldTakeSlow(Block b) {
+        return (b.getType() == Material.RAILS && (b.getData() >= 2 && b.getData() <= 9))
                ||
-               (b.getType() == Material.POWERED_RAIL
-                && (b.getData() >= 10 && b.getData() <= 13));
-
+               (b.getType() == Material.DETECTOR_RAIL || b.getType() == Material.ACTIVATOR_RAIL) &&
+                  (b.getData() >= 2 && b.getData() <= 5)
+               ||
+               (b.getType() == Material.POWERED_RAIL && (b.getData() >= 10 && b.getData() <= 13));
     }
 
     // ------------------------------------------------------------------------
