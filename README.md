@@ -14,8 +14,8 @@ User commands:
 Administrative commands:
 
  * `/hypercarts help` - Show usage help.
- * `/hypercarts - Show the server-wide maximum minecart speed.
- * `/hypercarts <number>§f - Set the server-wide maximum minecart speed.
+ * `/hypercarts` - Show the server-wide maximum minecart speed.
+ * `/hypercarts <number>` - Set the server-wide maximum minecart speed.
 
 
 Configuration
