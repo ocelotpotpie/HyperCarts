@@ -3,14 +3,17 @@ package nu.nerd.hc;
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.Rail;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Minecart;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -19,6 +22,9 @@ import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.vehicle.VehicleCreateEvent;
 import org.bukkit.event.vehicle.VehicleMoveEvent;
+import org.bukkit.metadata.FixedMetadataValue;
+import org.bukkit.metadata.MetadataValue;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 
@@ -40,7 +46,7 @@ import org.bukkit.util.Vector;
  * </ul>
  * and do two things:
  * <ul>
- * <li>Set the maximum speed back to the default until the ramp is back on the
+ * <li>Set the maximum speed back to the default until the cart is back on the
  * horizontal.</li>
  * <li>Restore the velocity of the cart to what it was in the previous
  * tick.</li>
@@ -50,6 +56,12 @@ import org.bukkit.util.Vector;
  * vanilla value and the server-wide maximum, but this will only be applied to
  * carts ridden by players, not empty carts or chest carts, for instance. It is
  * too onerous to track who placed what cart across restarts.
+ * 
+ * There is one further wrinkle: the physics changes can break certain passenger
+ * detection designs involving a ramp. To guard against that, carts stick to
+ * vanilla speed for a configurable number of ticks after encountering a "speed
+ * hump" (ramp or curve) - by default, 2 seconds - rather than speeding up again
+ * immediately once past it.
  */
 public class HyperCarts extends JavaPlugin implements Listener {
     /**
@@ -66,7 +78,9 @@ public class HyperCarts extends JavaPlugin implements Listener {
         PLUGIN = this;
 
         saveDefaultConfig();
+        _debug = getConfig().getBoolean("debug");
         _maxSpeed = getConfig().getDouble("max-speed");
+        _slowDownTicks = getConfig().getInt("slow-down-ticks");
 
         File playersFile = new File(getDataFolder(), PLAYERS_FILE);
         _playerConfig = YamlConfiguration.loadConfiguration(playersFile);
@@ -173,23 +187,61 @@ public class HyperCarts extends JavaPlugin implements Listener {
     public void onVehicleMove(VehicleMoveEvent event) {
         if (event.getVehicle() instanceof Minecart) {
             Minecart cart = (Minecart) event.getVehicle();
+            CartMeta meta = getCartMeta(cart);
             Block toBlock = event.getTo().getBlock();
+
+            List<Entity> passengers = cart.getPassengers();
+            Entity passenger = (passengers.size() != 0) ? passengers.get(0) : null;
+            Player player = (passenger instanceof Player) ? (Player) passenger : null;
+            boolean sendDebugMessages = (_debug && player != null &&
+                                         player.hasPermission("hypercarts.debug"));
+
             if (isRail(toBlock)) {
                 if (shouldTakeSlow(toBlock)) {
                     if (cart.getMaxSpeed() > VANILLA_MAX_SPEED) {
-                        Vector oldVelocity = _lastVelocity.get(cart.getEntityId());
-                        if (oldVelocity != null) {
-                            cart.setVelocity(oldVelocity);
+                        if (meta.previousTickVelocity != null) {
+                            cart.setVelocity(meta.previousTickVelocity);
                         }
                         cart.setMaxSpeed(VANILLA_MAX_SPEED);
+
+                        if (sendDebugMessages && meta.slowDownRemainingTicks < _slowDownTicks) {
+                            debug(player, "Slow down to vanilla.");
+                        }
+                        // Reset the count down to full speed.
+                        meta.slowDownRemainingTicks = _slowDownTicks;
+
                     }
                 } else {
-                    cart.setMaxSpeed((cart.getPassenger() instanceof Player) ? getState((Player) cart.getPassenger()).getMaxCartSpeed()
-                                                                             : getMaxCartSpeed());
+                    // Count down the ticks before setting full speed.
+                    if (--meta.slowDownRemainingTicks <= 0) {
+                        // Set max speed EVERY tick to track the /cart-speed.
+                        cart.setMaxSpeed((passenger instanceof Player) ? getState((Player) passenger).getMaxCartSpeed()
+                                                                       : getMaxCartSpeed());
+                        if (sendDebugMessages && meta.slowDownRemainingTicks == 0) {
+                            debug(player, "Full speed.");
+                        }
+                    }
                 }
             }
-            _lastVelocity.put(cart.getEntityId(), cart.getVelocity());
+            meta.previousTickVelocity = cart.getVelocity();
         }
+    }
+
+    // --------------------------------------------------------------------------
+    /**
+     * Return the CartMeta associated with a cart, lazily creating it on demand.
+     * 
+     * @param cart the Minecart.
+     * @return the metadata as a CartMeta instance.
+     */
+    private CartMeta getCartMeta(Minecart cart) {
+        List<MetadataValue> metaList = cart.getMetadata(CART_META_KEY);
+        CartMeta meta = (metaList.size() == 1) ? (CartMeta) metaList.get(0) : null;
+        if (meta == null) {
+            meta = new CartMeta(this);
+            cart.setMetadata(CART_META_KEY, meta);
+        }
+        return meta;
     }
 
     // ------------------------------------------------------------------------
@@ -241,7 +293,7 @@ public class HyperCarts extends JavaPlugin implements Listener {
      * @return true if the specified block is a type of rail.
      */
     private boolean isRail(Block b) {
-        return b.getType() == Material.RAILS ||
+        return b.getType() == Material.RAIL ||
                b.getType() == Material.POWERED_RAIL ||
                b.getType() == Material.DETECTOR_RAIL ||
                b.getType() == Material.ACTIVATOR_RAIL;
@@ -254,23 +306,47 @@ public class HyperCarts extends JavaPlugin implements Listener {
      *
      * The particular rail types for which a cart should slow down are:
      * <ul>
-     * <li>Regular, detector or activator rail ramps, data values 2 through
-     * 5,</li>
-     * <li>Curved regular rails, data values 6 through 9,</li>
-     * <li>Powered rail ramps, data values 10 through 13.</li>
+     * <li>Regular, detector or activator rail ramps,</li>
+     * <li>Curved regular rails,</li>
+     * <li>Powered rail ramps that have redstone power.</li>
      * </ul>
      *
-     * @param b the block to check.
+     * @param b the block to check, which must be a type of rail.
      * @return true if a cart should follow the rails in the specified block at
      *         vanilla speed.
      */
     private boolean shouldTakeSlow(Block b) {
-        return (b.getType() == Material.RAILS && (b.getData() >= 2 && b.getData() <= 9))
-               ||
-               (b.getType() == Material.DETECTOR_RAIL || b.getType() == Material.ACTIVATOR_RAIL) &&
-                  (b.getData() >= 2 && b.getData() <= 5)
-               ||
-               (b.getType() == Material.POWERED_RAIL && (b.getData() >= 10 && b.getData() <= 13));
+        Rail rail = (Rail) b.getBlockData();
+        Rail.Shape shape = rail.getShape();
+        if (b.getType() == Material.RAIL) {
+            // Ramps and curves of regular rail.
+            return (shape != Rail.Shape.NORTH_SOUTH && shape != Rail.Shape.EAST_WEST);
+        } else if (b.getType() == Material.DETECTOR_RAIL ||
+                   b.getType() == Material.ACTIVATOR_RAIL ||
+                   (b.getType() == Material.POWERED_RAIL && b.getBlockPower() != 0)) {
+            return shape == Rail.Shape.ASCENDING_NORTH ||
+                   shape == Rail.Shape.ASCENDING_SOUTH ||
+                   shape == Rail.Shape.ASCENDING_EAST ||
+                   shape == Rail.Shape.ASCENDING_WEST;
+        }
+        return false;
+    }
+
+    // ------------------------------------------------------------------------
+    /**
+     * Send debug messages.
+     * 
+     * @param player the message recipient, or null to broadcast to all players
+     *        with the "hypercarts.debug" permission.
+     * @param message the message.
+     */
+    private void debug(Player player, String message) {
+        String translated = ChatColor.translateAlternateColorCodes('&', "&e[HyperCarts] " + message);
+        if (player != null) {
+            player.sendMessage(translated);
+        } else {
+            Bukkit.broadcast(translated, "hypercarts.debug");
+        }
     }
 
     // ------------------------------------------------------------------------
@@ -280,16 +356,55 @@ public class HyperCarts extends JavaPlugin implements Listener {
     public static final double VANILLA_MAX_SPEED = 0.4;
 
     /**
-     * Maximum speed of carts.
+     * Metadata key used to look up Minecart transient metadata.
+     */
+    private static final String CART_META_KEY = "HyperCarts";
+
+    /**
+     * Class of metadata attached to Minecarts.
+     */
+    private static final class CartMeta extends FixedMetadataValue {
+        /**
+         * Constructor.
+         * 
+         * @param owningPlugin the owning plugin.
+         */
+        public CartMeta(Plugin owningPlugin) {
+            super(owningPlugin, null);
+        }
+
+        /**
+         * Number of ticks to keep the cart slowed after hitting a speed bump.
+         * When this has counted down to zero, maximum speed is restored.
+         */
+        int slowDownRemainingTicks;
+
+        /**
+         * Velocity of the cart in the previous tick. Used to deal with
+         * spontaneous velocity reversal, as dicussed in the plugin class doc
+         * comment.
+         */
+        Vector previousTickVelocity;
+    }
+
+    /**
+     * If true, send debug messages to players with the hypercarts.debug
+     * permission.
+     */
+    private boolean _debug;
+
+    /**
+     * Maximum speed of carts, loaded from the configuration.
      *
      * The vanilla default is 0.4.
      */
     private double _maxSpeed;
 
     /**
-     * Map from cart entity ID to its velocity in the previous tick.
+     * The number of ticks a cart will be slowed down after encountering a ramp
+     * or curve that requires that, as loaded from the configuration.
      */
-    private final HashMap<Integer, Vector> _lastVelocity = new HashMap<Integer, Vector>();
+    private int _slowDownTicks;
 
     /**
      * Name of players file.

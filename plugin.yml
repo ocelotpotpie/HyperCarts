@@ -5,6 +5,7 @@ authors: [totemo]
 description: ${project.description}
 website: ${project.url}
 main: nu.nerd.hc.HyperCarts
+api-version: 1.13
 
 permissions:
   hypercarts.admin:
