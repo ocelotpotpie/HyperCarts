@@ -44,7 +44,7 @@ public class PlayerState {
         if (section == null) {
             section = config.createSection(_player.getUniqueId().toString());
         }
-        _maxCartSpeed = section.getDouble("max-speed", HyperCarts.PLUGIN.getMaxCartSpeed());
+        _maxCartSpeed = section.getDouble("max-speed", HyperCarts.CONFIG.MAX_SPEED);
     }
 
     // ------------------------------------------------------------------------
@@ -58,8 +58,8 @@ public class PlayerState {
      * @param bpt player's maximum cart speed in blocks per tick.
      */
     public void setMaxCartSpeed(double bpt) {
-        double min = Math.min(HyperCarts.VANILLA_MAX_SPEED, HyperCarts.PLUGIN.getMaxCartSpeed());
-        _maxCartSpeed = Math.min(Math.max(bpt, min), HyperCarts.PLUGIN.getMaxCartSpeed());
+        double min = Math.min(HyperCarts.VANILLA_MAX_SPEED, HyperCarts.CONFIG.MAX_SPEED);
+        _maxCartSpeed = Math.min(Math.max(bpt, min), HyperCarts.CONFIG.MAX_SPEED);
     }
 
     // ------------------------------------------------------------------------
@@ -72,7 +72,7 @@ public class PlayerState {
      * @return the player's maximum cart speed in blocks per tick.
      */
     public double getMaxCartSpeed() {
-        return Math.min(_maxCartSpeed, HyperCarts.PLUGIN.getMaxCartSpeed());
+        return Math.min(_maxCartSpeed, HyperCarts.CONFIG.MAX_SPEED);
     }
 
     // ------------------------------------------------------------------------

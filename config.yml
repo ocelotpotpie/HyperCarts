@@ -1,3 +1,6 @@
-debug: false
+debug:
+  log-configuration: false
+  to-log: false
+  level: 0
 max-speed: 0.8
 slow-down-ticks: 40

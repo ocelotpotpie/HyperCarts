@@ -14,15 +14,18 @@ User commands:
 Administrative commands:
 
  * `/hypercarts help` - Show usage help.
- * `/hypercarts` - Show the server-wide maximum minecart speed.
- * `/hypercarts <number>` - Set the server-wide maximum minecart speed.
+ * `/hypercarts max` - Show the server-wide maximum minecart speed.
+ * `/hypercarts max <number>` - Set the server-wide maximum minecart speed.
+ * `/hypercarts reload` - Reload the configuration.
 
 
 Configuration
 -------------
 | Setting           | Description |
 | :---              | :--- |
-| `debug`           | If true, players with the `hypercarts.debug` permission receive debug messages while riding a cart. | 
+| `debug.log-configuration` | If true, log the configuration on load. |
+| `debug.to-log`    | If true, debug messages also go to the server log. |
+| `debug.level`     | If non-zero, send debug messages to players with the `hypercarts.debug` permission. Higher numbers send more information. |
 | `max-speed`       | The maximum speed value of a minecart, set when the vehicle is created. The vanilla default is 0.4. |
 | `slow-down-ticks` | The time period in ticks that carts (default 40) will be slowed to vanilla speed after encountering a curve or ramp. |
 

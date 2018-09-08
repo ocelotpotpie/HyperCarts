@@ -7,8 +7,10 @@ import java.util.List;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.Powerable;
 import org.bukkit.block.data.Rail;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -69,6 +71,11 @@ public class HyperCarts extends JavaPlugin implements Listener {
      */
     public static HyperCarts PLUGIN;
 
+    /**
+     * The configuration as a singleton.
+     */
+    public static final Configuration CONFIG = new Configuration();
+
     // ------------------------------------------------------------------------
     /**
      * @see org.bukkit.plugin.java.JavaPlugin#onEnable()
@@ -78,9 +85,7 @@ public class HyperCarts extends JavaPlugin implements Listener {
         PLUGIN = this;
 
         saveDefaultConfig();
-        _debug = getConfig().getBoolean("debug");
-        _maxSpeed = getConfig().getDouble("max-speed");
-        _slowDownTicks = getConfig().getInt("slow-down-ticks");
+        CONFIG.reload();
 
         File playersFile = new File(getDataFolder(), PLAYERS_FILE);
         _playerConfig = YamlConfiguration.loadConfiguration(playersFile);
@@ -113,24 +118,25 @@ public class HyperCarts extends JavaPlugin implements Listener {
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (command.getName().equalsIgnoreCase("hypercarts")) {
-            if (args.length == 0) {
-                sender.sendMessage(ChatColor.GOLD + "The current server-wide maximum cart speed is " + getMaxCartSpeed() +
+
+            if (args.length == 1 && args[0].equalsIgnoreCase("help")) {
+                return false;
+            } else if (args.length == 1 && args[0].equalsIgnoreCase("max")) {
+                sender.sendMessage(ChatColor.GOLD + "The current server-wide maximum cart speed is " + CONFIG.MAX_SPEED +
                                    " blocks per tick (the vanilla default is " + VANILLA_MAX_SPEED + ").");
-            } else if (args.length == 1) {
-                if (args[0].equalsIgnoreCase("help")) {
-                    return false;
-                } else {
-                    try {
-                        _maxSpeed = Math.max(0.0, Double.parseDouble(args[0]));
-                        sender.sendMessage(ChatColor.GOLD + "The server-wide maximum cart speed was set to " + getMaxCartSpeed() +
-                                           " blocks per tick (the vanilla default is " + VANILLA_MAX_SPEED + ").");
-                        getConfig().set("max-speed", getMaxCartSpeed());
-                        saveConfig();
-                    } catch (NumberFormatException ex) {
-                        sender.sendMessage(ChatColor.RED + "You must specify a floating point number for the new speed.");
-                    }
-                    return true;
+            } else if (args.length == 2 && args[0].equalsIgnoreCase("max")) {
+                try {
+                    CONFIG.MAX_SPEED = Math.max(0.0, Double.parseDouble(args[1]));
+                    sender.sendMessage(ChatColor.GOLD + "The server-wide maximum cart speed was set to " + CONFIG.MAX_SPEED +
+                                       " blocks per tick (the vanilla default is " + VANILLA_MAX_SPEED + ").");
+                    CONFIG.save();
+                    sender.sendMessage(ChatColor.GOLD + getName() + " configuration saved.");
+                } catch (NumberFormatException ex) {
+                    sender.sendMessage(ChatColor.RED + "You must specify a floating point number for the new speed.");
                 }
+            } else if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
+                CONFIG.reload();
+                sender.sendMessage(ChatColor.GOLD + getName() + " configuration reloaded.");
             } else {
                 return false;
             }
@@ -144,7 +150,7 @@ public class HyperCarts extends JavaPlugin implements Listener {
             if (args.length == 0) {
                 sender.sendMessage(ChatColor.GOLD + "Your current maximum cart speed is " + state.getMaxCartSpeed() + " blocks per tick.");
                 sender.sendMessage(ChatColor.GOLD + "The vanilla default is " + VANILLA_MAX_SPEED +
-                                   " and the server-wide limit is " + getMaxCartSpeed() + ".");
+                                   " and the server-wide limit is " + CONFIG.MAX_SPEED + ".");
             } else if (args.length == 1) {
                 if (args[0].equalsIgnoreCase("help")) {
                     return false;
@@ -153,11 +159,10 @@ public class HyperCarts extends JavaPlugin implements Listener {
                         state.setMaxCartSpeed(Double.parseDouble(args[0]));
                         sender.sendMessage(ChatColor.GOLD + "Your maximum cart speed was set to " + state.getMaxCartSpeed() + " blocks per tick.");
                         sender.sendMessage(ChatColor.GOLD + "The vanilla default is " + VANILLA_MAX_SPEED +
-                                           " and the server-wide limit is " + getMaxCartSpeed() + ".");
+                                           " and the server-wide limit is " + CONFIG.MAX_SPEED + ".");
                     } catch (NumberFormatException ex) {
                         sender.sendMessage(ChatColor.RED + "You must specify a floating point number for the new speed.");
                     }
-                    return true;
                 }
             } else {
                 return false;
@@ -174,7 +179,7 @@ public class HyperCarts extends JavaPlugin implements Listener {
     public void onVehicleCreate(VehicleCreateEvent event) {
         if (event.getVehicle() instanceof Minecart) {
             Minecart cart = (Minecart) event.getVehicle();
-            cart.setMaxSpeed(getMaxCartSpeed());
+            cart.setMaxSpeed(CONFIG.MAX_SPEED);
         }
     }
 
@@ -193,32 +198,32 @@ public class HyperCarts extends JavaPlugin implements Listener {
             List<Entity> passengers = cart.getPassengers();
             Entity passenger = (passengers.size() != 0) ? passengers.get(0) : null;
             Player player = (passenger instanceof Player) ? (Player) passenger : null;
-            boolean sendDebugMessages = (_debug && player != null &&
+            boolean sendDebugMessages = (CONFIG.DEBUG_LEVEL > 0 && player != null &&
                                          player.hasPermission("hypercarts.debug"));
-
             if (isRail(toBlock)) {
-                if (shouldTakeSlow(toBlock)) {
+                if (shouldTakeSlow(player, toBlock)) {
+                    debug(3, player, "Should take slow.");
                     if (cart.getMaxSpeed() > VANILLA_MAX_SPEED) {
                         if (meta.previousTickVelocity != null) {
                             cart.setVelocity(meta.previousTickVelocity);
+                            debug(1, player, "Restore previous tick velocity.");
                         }
                         cart.setMaxSpeed(VANILLA_MAX_SPEED);
 
-                        if (sendDebugMessages && meta.slowDownRemainingTicks < _slowDownTicks) {
-                            debug(player, "Slow down to vanilla.");
+                        if (sendDebugMessages && meta.slowDownRemainingTicks < CONFIG.SLOW_DOWN_TICKS) {
+                            debug(1, player, "Slow down to vanilla.");
                         }
                         // Reset the count down to full speed.
-                        meta.slowDownRemainingTicks = _slowDownTicks;
-
+                        meta.slowDownRemainingTicks = CONFIG.SLOW_DOWN_TICKS;
                     }
                 } else {
                     // Count down the ticks before setting full speed.
                     if (--meta.slowDownRemainingTicks <= 0) {
                         // Set max speed EVERY tick to track the /cart-speed.
                         cart.setMaxSpeed((passenger instanceof Player) ? getState((Player) passenger).getMaxCartSpeed()
-                                                                       : getMaxCartSpeed());
+                                                                       : CONFIG.MAX_SPEED);
                         if (sendDebugMessages && meta.slowDownRemainingTicks == 0) {
-                            debug(player, "Full speed.");
+                            debug(1, player, "Full speed.");
                         }
                     }
                 }
@@ -227,7 +232,7 @@ public class HyperCarts extends JavaPlugin implements Listener {
         }
     }
 
-    // --------------------------------------------------------------------------
+    // ------------------------------------------------------------------------
     /**
      * Return the CartMeta associated with a cart, lazily creating it on demand.
      * 
@@ -262,16 +267,6 @@ public class HyperCarts extends JavaPlugin implements Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         PlayerState state = _state.remove(event.getPlayer().getName());
         state.save(_playerConfig);
-    }
-
-    // ------------------------------------------------------------------------
-    /**
-     * Return the server-wide maximum minecart speed.
-     *
-     * @return the server-wide maximum minecart speed.
-     */
-    public double getMaxCartSpeed() {
-        return _maxSpeed;
     }
 
     // ------------------------------------------------------------------------
@@ -311,19 +306,28 @@ public class HyperCarts extends JavaPlugin implements Listener {
      * <li>Powered rail ramps that have redstone power.</li>
      * </ul>
      *
+     * @param player the riding player, to receive debug messages.
      * @param b the block to check, which must be a type of rail.
      * @return true if a cart should follow the rails in the specified block at
      *         vanilla speed.
      */
-    private boolean shouldTakeSlow(Block b) {
+    private boolean shouldTakeSlow(Player player, Block b) {
         Rail rail = (Rail) b.getBlockData();
         Rail.Shape shape = rail.getShape();
+        boolean powered = (rail instanceof Powerable) ? ((Powerable) rail).isPowered() : b.isBlockPowered();
+
+        if (CONFIG.DEBUG_LEVEL != 0 && player != null) {
+            Location loc = player.getLocation();
+            String coords = String.format("%5.2f %5.2f %5.2f", loc.getX(), loc.getY(), loc.getZ());
+            debug(2, player, coords + " " + shape + " " + b.getType() + " " + (powered ? "ON" : "OFF"));
+        }
+
         if (b.getType() == Material.RAIL) {
             // Ramps and curves of regular rail.
             return (shape != Rail.Shape.NORTH_SOUTH && shape != Rail.Shape.EAST_WEST);
         } else if (b.getType() == Material.DETECTOR_RAIL ||
                    b.getType() == Material.ACTIVATOR_RAIL ||
-                   (b.getType() == Material.POWERED_RAIL && b.getBlockPower() != 0)) {
+                   (b.getType() == Material.POWERED_RAIL && powered)) {
             return shape == Rail.Shape.ASCENDING_NORTH ||
                    shape == Rail.Shape.ASCENDING_SOUTH ||
                    shape == Rail.Shape.ASCENDING_EAST ||
@@ -336,16 +340,24 @@ public class HyperCarts extends JavaPlugin implements Listener {
     /**
      * Send debug messages.
      * 
+     * @param level the minimum debug-level setting for the message to be
+     *        visible.
      * @param player the message recipient, or null to broadcast to all players
      *        with the "hypercarts.debug" permission.
      * @param message the message.
      */
-    private void debug(Player player, String message) {
-        String translated = ChatColor.translateAlternateColorCodes('&', "&e[HyperCarts] " + message);
-        if (player != null) {
-            player.sendMessage(translated);
-        } else {
-            Bukkit.broadcast(translated, "hypercarts.debug");
+    private void debug(int level, Player player, String message) {
+        if (CONFIG.DEBUG_LEVEL >= level) {
+            String translated = ChatColor.translateAlternateColorCodes('&', "&e[HC] " + message);
+            if (player != null) {
+                player.sendMessage(translated);
+            } else {
+                Bukkit.broadcast(translated, "hypercarts.debug");
+            }
+        }
+        if (CONFIG.DEBUG_TO_LOG) {
+            String name = (player != null) ? player.getName() + ": " : "";
+            getLogger().info(name + message);
         }
     }
 
@@ -386,25 +398,6 @@ public class HyperCarts extends JavaPlugin implements Listener {
          */
         Vector previousTickVelocity;
     }
-
-    /**
-     * If true, send debug messages to players with the hypercarts.debug
-     * permission.
-     */
-    private boolean _debug;
-
-    /**
-     * Maximum speed of carts, loaded from the configuration.
-     *
-     * The vanilla default is 0.4.
-     */
-    private double _maxSpeed;
-
-    /**
-     * The number of ticks a cart will be slowed down after encountering a ramp
-     * or curve that requires that, as loaded from the configuration.
-     */
-    private int _slowDownTicks;
 
     /**
      * Name of players file.

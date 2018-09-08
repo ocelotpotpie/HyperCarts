@@ -1,7 +1,7 @@
 name: ${project.name}
 version: ${project.version}
 author: totemo
-authors: [totemo]
+authors: []
 description: ${project.description}
 website: ${project.url}
 main: nu.nerd.hc.HyperCarts
@@ -23,8 +23,9 @@ commands:
     usage: |
 
       §e/<command> help§f - Show usage help.
-      §e/<command>§f - Show the server-wide maximum minecart speed.
-      §e/<command> <number>§f - Set the server-wide maximum minecart speed.
+      §e/<command> max§f - Show the server-wide maximum minecart speed.
+      §e/<command> max <number>§f - Set the server-wide maximum minecart speed.
+      §e/<command> reload§f - Reload the configuration.
 
   cart-speed:
     description: Set your personal maximum cart speed.
